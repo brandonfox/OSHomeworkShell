@@ -41,6 +41,8 @@ int main(){
     char exit[5] = {'e','x','i','t'};
     char jobs[5] = {'j','o','b','s'};
     char echo[5] = {'e','c','h','o'};
+    char fg[3] = {'f','g'};
+    char bg[3] = {'b','g'};
 
     initJobs();
 
@@ -53,11 +55,10 @@ int main(){
         char **commandArgs = parseCommand(input);
         if(strlen(input) == 0) {
             free(input);
+            freeCommands(commandArgs);
             continue;
         }
         else if(strcmp(*commandArgs,exit) == 0){
-            free(input);
-            freeCommands(commandArgs);
             killAllProcesses();
             return 0;
         }
@@ -70,6 +71,9 @@ int main(){
             printArgs(commandArgs + 1);
             free(input);
             freeCommands(commandArgs);
+        }
+        else if(strcmp(*commandArgs,fg) == 0){
+            continueJob(atoi(*(commandArgs + 1)));
         }
         else{
             createNewProcess(*commandArgs,commandArgs,input);
