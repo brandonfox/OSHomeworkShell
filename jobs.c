@@ -5,8 +5,10 @@
 #include<pthread.h>
 #include<stdlib.h>
 
+#define idle -1
+
 int runningJobs = 0;
-int activeJobIndex = 0;
+int activeJobIndex = idle;
 pid_t *processes;
 int processesSize = 16;
 int lastExitCode = 0;
@@ -19,7 +21,7 @@ int removeProcess(pid_t pid){
             //printf("Removing process with pid %d and cmdString %s\n",pid,*(commandStrings + i));
             *(processes + i) = 0;
             free(*(commandStrings + i));
-            if(activeJobIndex == i+1) activeJobIndex = 0;
+            if(activeJobIndex == i) activeJobIndex = idle;
             return i;
         }
     }
@@ -29,7 +31,6 @@ int removeProcess(pid_t pid){
 void childHandler(int sig){
     int status;
     pid_t pid = wait3(&status,WNOHANG,NULL);
-    fflush(stdout);
     //printf("Child process pid %d exited with status code %d\n",pid,status);
     removeProcess(pid);
 }
@@ -51,7 +52,7 @@ int storeProcess(pid_t pid, char* input){
             //printf("Storing process with pid %d and cmdString %s\n",pid,*(commandStrings + i));
             *(processes + i) = pid;
             *(commandStrings + i) = input;
-            return i+1;
+            return i;
         }
     }
     //This means an error has occured
@@ -60,7 +61,7 @@ int storeProcess(pid_t pid, char* input){
 
 void moveToBackground(){
     printf("[%d] Has been moved to background\n",activeJobIndex);
-    activeJobIndex = 0;
+    activeJobIndex = idle;
 }
 
 int hasActiveJob(){
@@ -68,14 +69,14 @@ int hasActiveJob(){
 }
 
 int handleSigInt(){
-    if(activeJobIndex > 0){
+    if(activeJobIndex > idle){
         kill(*(processes + activeJobIndex),SIGINT);
         return 1;
     }
     else return 0;
 }
 int handleSigStop(){
-    if(activeJobIndex > 0){
+    if(activeJobIndex > idle){
         kill(*(processes + activeJobIndex),SIGTSTP);
         printf("\n");
         fflush(stdout);
@@ -91,7 +92,7 @@ void printBackgroundJobs(){
     }
 }
 
-void createNewProcess(char* command,char *args[],char *input){
+void createNewProcess(char* command,char **args,char *input){
     pid_t pid = fork();
     activeJobIndex = storeProcess(pid,input);
     runningJobs++;

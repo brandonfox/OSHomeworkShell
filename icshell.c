@@ -11,9 +11,8 @@ void resetPrompt(){
 }
 
 void sigIntHandler(int sig){
-    if(!handleSigInt()){
+    if(!handleSigInt())
         resetPrompt();
-    }
 }
 
 void sigStopHandler(int sig){
@@ -24,7 +23,7 @@ void sigStopHandler(int sig){
 char exitCmd[3] = {'$','?'};
 
 void printArgs(char** args){
-    for(char **c = args + 1; *c != (char*)-1; c++){
+    for(char **c = args; *c != NULL; c++){
         if(strcmp(*c,exitCmd) == 0) printf("%d ",lastExitStatus());
         else printf("%s ",*c);
     }
@@ -68,15 +67,15 @@ int main(){
             freeCommands(commandArgs);
         }
         else if(strcmp(*commandArgs,echo) == 0){
-            printArgs(commandArgs);
+            printArgs(commandArgs + 1);
             free(input);
             freeCommands(commandArgs);
         }
         else{
-            createNewProcess(*commandArgs,commandArgs + 1,input);
+            createNewProcess(*commandArgs,commandArgs,input);
         }
 
-        while(hasActiveJob()){
+        while(hasActiveJob() >= 0){
             continue;
         }
     }

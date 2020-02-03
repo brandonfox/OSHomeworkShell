@@ -10,6 +10,7 @@ char** parseCommand(char* line){
     int wordLen = -1;
     for(char *c = line; *c != '\0'; c++){
         if(*c == ' ' || *c == '\n'){
+            if(wordLen < 0) continue;
             command++;
             argv = realloc(argv,sizeof(char**) * (command + 1));
             *(argv + command)= curentWord;
@@ -20,6 +21,7 @@ char** parseCommand(char* line){
             wordLen++;
             curentWord = realloc(curentWord,sizeof(char*) * (wordLen + 2));
             *(curentWord + wordLen) = *c;
+            *(curentWord + wordLen + 1) = '\0';
         }
     }
     if(wordLen >= 0){
@@ -28,11 +30,11 @@ char** parseCommand(char* line){
         *(argv + command) = curentWord;
     }else free(curentWord);
     argv = realloc(argv,sizeof(char**) * (command + 2));
-    *(argv + command + 1) = (char*)-1;
+    *(argv + command + 1) = NULL;
     return argv;
 }
 void freeCommands(char** cmd){
-    for(char **c = cmd; *c != (char*)-1; c++){
+    for(char **c = cmd; *c != NULL; c++){
         free(*c);
     }
     free(cmd);
