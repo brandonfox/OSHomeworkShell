@@ -1,7 +1,7 @@
 # build a program from 2 files and one shared header
 CC = gcc
-CCFLAGS = -pthread
-FILES = icshell.c jobs.c
+CCFLAGS = -pthread -g
+FILES = icshell.c jobs.c commandparser.c
 FILENAME = icsh
 
 program: ${FILES}

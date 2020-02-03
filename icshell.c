@@ -3,6 +3,7 @@
 #include<signal.h>
 #include<string.h>
 #include "jobs.h"
+#include "commandparser.h"
 
 void resetPrompt(){
     printf("\nicsh>");
@@ -20,6 +21,16 @@ void sigStopHandler(int sig){
         resetPrompt();
 }
 
+char exitCmd[3] = {'$','?'};
+
+void printArgs(char** args){
+    for(char **c = args + 1; *c != (char*)-1; c++){
+        if(strcmp(*c,exitCmd) == 0) printf("%d ",lastExitStatus());
+        else printf("%s ",*c);
+    }
+    printf("\n");
+}
+
 int main(){
 
     //Assign signal handlers here
@@ -30,31 +41,43 @@ int main(){
     
     char exit[5] = {'e','x','i','t'};
     char jobs[5] = {'j','o','b','s'};
+    char echo[5] = {'e','c','h','o'};
 
     initJobs();
 
     while(1){
 
-        while(hasActiveJob()){
-            continue;
-        }
-
-        char *input = malloc(256);
-
+        char *input = malloc(512);
         printf("icsh>");
-        fgets(input,sizeof(input),stdin);
-        input[strlen(input)-1] = 0;
+        fgets(input,512,stdin);
+        input[strlen(input) - 1] = '\0';
+        char **commandArgs = parseCommand(input);
         if(strlen(input) == 0) {
+            free(input);
             continue;
         }
-        else if(strcmp(input,exit) == 0){
-            printf("Got exit command\n");
+        else if(strcmp(*commandArgs,exit) == 0){
+            free(input);
+            freeCommands(commandArgs);
+            killAllProcesses();
+            return 0;
         }
-        else if(strcmp(input,jobs) == 0){
+        else if(strcmp(*commandArgs,jobs) == 0){
             printBackgroundJobs();
+            free(input);
+            freeCommands(commandArgs);
+        }
+        else if(strcmp(*commandArgs,echo) == 0){
+            printArgs(commandArgs);
+            free(input);
+            freeCommands(commandArgs);
         }
         else{
-            createNewProcess(input);
+            createNewProcess(*commandArgs,commandArgs + 1,input);
+        }
+
+        while(hasActiveJob()){
+            continue;
         }
     }
 }

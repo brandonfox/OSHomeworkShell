@@ -10,14 +10,37 @@ int activeJobIndex = 0;
 pid_t *processes;
 int processesSize = 16;
 int lastExitCode = 0;
-char ** commandStrings;
+char **commandStrings;
+
+int removeProcess(pid_t pid){
+    runningJobs--;
+    for(int i = 0; i < processesSize; i++){
+        if(*(processes + i) == pid){
+            //printf("Removing process with pid %d and cmdString %s\n",pid,*(commandStrings + i));
+            *(processes + i) = 0;
+            free(*(commandStrings + i));
+            if(activeJobIndex == i+1) activeJobIndex = 0;
+            return i;
+        }
+    }
+    return -1;
+}
+
+void childHandler(int sig){
+    int status;
+    pid_t pid = wait3(&status,WNOHANG,NULL);
+    fflush(stdout);
+    //printf("Child process pid %d exited with status code %d\n",pid,status);
+    removeProcess(pid);
+}
 
 void initJobs(){
     processes = malloc(sizeof(pid_t) * processesSize);
     commandStrings = malloc(sizeof(char*) * processesSize);
+    signal(SIGCHLD,childHandler);
 }
 
-int storeProcess(pid_t pid, char *args){
+int storeProcess(pid_t pid, char* input){
     if(runningJobs == processesSize){
         processesSize *= 2;
         processes = realloc(processes,sizeof(pid_t*) * processesSize);
@@ -25,10 +48,10 @@ int storeProcess(pid_t pid, char *args){
     }
     for(int i = 0; i < processesSize; i++){
         if(*(processes + i) <= 0){
-            printf("Process pid %d stored at index %d\n",pid,i);
+            //printf("Storing process with pid %d and cmdString %s\n",pid,*(commandStrings + i));
             *(processes + i) = pid;
-            *(commandStrings + i) = args;
-            return i;
+            *(commandStrings + i) = input;
+            return i+1;
         }
     }
     //This means an error has occured
@@ -64,53 +87,28 @@ int handleSigStop(){
 void printBackgroundJobs(){
     for(int i = 0; i < processesSize; i++){
         if(*(processes + i) > 0)
-            printf("[%d] %s\n",i,*(commandStrings + i));
+            printf("[%d] %s\n",i+1,*(commandStrings + i));
     }
 }
 
-int removeProcess(pid_t pid){
-    runningJobs--;
-    for(int i = 0; i < processesSize; i++){
-        if(*(processes + i) == pid){
-            *(processes + i) = 0;
-            free(*(commandStrings + i));
-            return i;
-        }
-    }
-    return -1;
-}
-
-void *waitForChildTermination(void* pidPointer){
-    pid_t pid = *(pid_t*)pidPointer;
-    printf("Created thread to moniter pid %d\n",pid);
-    int stat;
-    waitpid(pid,&stat,0);
-    if(WIFEXITED(stat)){
-        printf("Removing pid %d, activejobindex:%d\n",pid,activeJobIndex);
-        if(*(processes + activeJobIndex) == pid){
-            printf("Removing active process\n");
-            activeJobIndex = 0;
-            lastExitCode = stat;
-        }
-        removeProcess(pid);
-        pthread_exit(NULL);
-    }
-    else
-    {
-        waitForChildTermination(&pid);
-    }
-}
-
-void createNewProcess(char* args){
+void createNewProcess(char* command,char *args[],char *input){
     pid_t pid = fork();
+    activeJobIndex = storeProcess(pid,input);
+    runningJobs++;
     if(pid == 0){
-        execlp(args,args,NULL);
-        printf("Command not found\n");
+        execvp(command,args);
+        printf("Command '%s' not found\n",input);
+        fflush(stdout);
         exit(0);
     }
-    printf("Created process with pid %d\n",pid);
-    pthread_t childMoniterThread;
-    pthread_create(&childMoniterThread,NULL,waitForChildTermination,&pid);
-    runningJobs++;
-    activeJobIndex = storeProcess(pid,args);
+}
+
+int lastExitStatus(){
+    return lastExitCode;
+}
+
+void killAllProcesses(){
+    for(int i = 0; i < processesSize; i++){
+        if(*(processes + i) > 0) kill(*(processes + i),SIGKILL);
+    }
 }
