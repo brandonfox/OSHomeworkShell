@@ -1,8 +1,5 @@
 #include<stdlib.h>
 
-//Remove later
-#include<stdio.h>
-
 char** parseCommand(char* line){
     char **argv = malloc(sizeof(char**));
     int command = -1;
@@ -38,4 +35,22 @@ void freeCommands(char** cmd){
         free(*c);
     }
     free(cmd);
+}
+
+//-1 for input, 1 for output
+char* getRedirect(char** args, int *resStatus){
+    for(char** c = args; *c != NULL; c++){
+        if(**c == '>'){
+            *resStatus = 1;
+            *c = NULL;
+            return *(c+1);
+        }
+        else if(**c == '<'){
+            *resStatus = -1;
+            *c = NULL;
+            return *(c+1);
+        }
+    }
+    *resStatus = 0;
+    return NULL;
 }

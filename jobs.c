@@ -1,9 +1,13 @@
+#define _GNU_SOURCE
 #include<stdio.h>
 #include<unistd.h>
 #include<sys/wait.h>
 #include<signal.h>
 #include<pthread.h>
 #include<stdlib.h>
+#include<semaphore.h>
+#include<fcntl.h>
+#include<errno.h>
 
 #define idle -1
 
@@ -14,12 +18,23 @@ int processesSize = 2;
 int lastExitCode = 0;
 char **commandStrings;
 
-void continueJob(int job){
-    if(*(processes + job - 1) > 0){
-        printf("Bringing job to fg\n");
-        activeJobIndex = job - 1;
-        kill(*(processes + job - 1),SIGCONT);
-    }else printf("Invalid job number");
+int continueJob(int job){
+    pid_t pid = *(processes + job - 1);
+    if(pid > 0){
+        //printf("Sending continue command to process %d\n",pid);
+        setpgid(0,pid);
+        kill(pid,SIGCONT);
+        return job-1;
+    }
+    else{
+        printf("Invalid job number\n");
+        return idle;
+    } 
+}
+
+int continueJobFg(int job){
+    activeJobIndex = continueJob(job);
+    return activeJobIndex;
 }
 
 void initCmdStringsArr(char** arr, int size){
@@ -41,28 +56,52 @@ int removeProcess(pid_t pid){
             //printf("Removing process with pid %d and cmdString %s\n",pid,*(commandStrings + i));
             *(processes + i) = 0;
             free(*(commandStrings + i));
-            if(activeJobIndex == i) activeJobIndex = idle;
+            if(activeJobIndex == i){
+                activeJobIndex = idle;
+                //printf("Setting fg group to this\n");
+            }
             return i;
         }
     }
     return -1;
 }
 
-void childHandler(int sig){
+void childHandler(){
+    //printf("Something has happened to a child\n");
     int status;
-    pid_t pid = wait3(&status,WNOHANG,NULL);
-    if(WIFEXITED(status) && pid > 0){
-        //printf("pid %d exited with exit status %d\n",pid,WEXITSTATUS(status));
-        removeProcess(pid);
+    pid_t pid = wait3(&status,WUNTRACED|WCONTINUED|WNOHANG,NULL);
+    if(pid > 0){
+        //printf("%d,%d\n",pid,status);
+        if(WIFEXITED(status)){
+            //printf("pid %d exited with exit status %d\n",pid,WEXITSTATUS(status));
+            removeProcess(pid);
+        }
+        else if(WIFSIGNALED(status)){
+            //printf("Pid: %d exited due to signal %d\n",pid,WTERMSIG(status));
+            if(WTERMSIG(status) == SIGKILL){
+                removeProcess(pid);
+            }
+        }
+        else if (WIFSTOPPED(status)){
+            //printf("Pid: %d stopped with code %d\n",pid,WSTOPSIG(status));
+        }else{
+            //printf("Pid: %d continued \n",pid);
+        }
     }
 }
 
 void initJobs(){
+    printf("This shell pid is %d\n",getpid());
     processes = malloc(sizeof(pid_t) * processesSize);
     initProcessArr(processes,processesSize);
     commandStrings = malloc(sizeof(char*) * processesSize);
     initCmdStringsArr(commandStrings,processesSize);
-    signal(SIGCHLD,childHandler);
+    struct sigaction childsig = {0};
+    childsig.sa_handler = childHandler;
+    childsig.sa_flags = SA_SIGINFO|SA_RESTART;
+    sigaction(SIGCHLD,&childsig,NULL);
+    signal(SIGTTIN,SIG_IGN);
+    signal(SIGTTOU,SIG_IGN);
 }
 
 int storeProcess(pid_t pid, char* input){
@@ -87,8 +126,10 @@ int storeProcess(pid_t pid, char* input){
     return 0;
 }
 
-void moveToBackground(){
-    printf("[%d] '%s' has been moved to background\n",activeJobIndex+1,*(commandStrings + activeJobIndex));
+void moveToBackground(int jobIndex){
+    pid_t pid = *(processes + jobIndex);
+    printf("[%d] '%s' has been moved to background\n",jobIndex+1,*(commandStrings + jobIndex));
+    setpgid(pid,pid);
     activeJobIndex = idle;
 }
 
@@ -97,18 +138,21 @@ int hasActiveJob(){
 }
 
 int handleSigInt(){
+    pid_t pid = *(processes + activeJobIndex);
     if(activeJobIndex > idle){
-        kill(*(processes + activeJobIndex),SIGINT);
+        //printf("Sending kill command to job %d, process id %d\n",activeJobIndex,pid);
+        setpgid(pid,pid);
+        kill(pid,SIGKILL);
         return 1;
     }
     else return 0;
 }
 int handleSigStop(){
+    pid_t pid = *(processes + activeJobIndex);
     if(activeJobIndex > idle){
-        kill(*(processes + activeJobIndex),SIGTSTP);
-        printf("\n");
-        fflush(stdout);
+        //printf("Sending stop signal to process %d\n",pid);
         moveToBackground(activeJobIndex);
+        kill(pid,SIGTSTP);
         return 1;
     }else return 0;
 }
@@ -120,17 +164,49 @@ void printBackgroundJobs(){
     }
 }
 
-void createNewProcess(char* command,char **args,char *input){
+void createNewProcess(char* command,char **args,char *input,int redirectStatus, char* redirectFile,int background){
+
+    if(redirectStatus != 0 && redirectFile == NULL){
+        printf("Must specify a file for I/O redirection\n");
+        return;
+    }
+    int indup = dup(STDIN_FILENO);
+    int outdup = dup(STDOUT_FILENO);
+    int f1;
+    if(redirectFile != NULL){
+        f1 = creat(redirectFile,0666);
+        //printf("Setting pipe to file %s, %d, errno: %d\n",redirectFile,f1,errno);
+    }   
     pid_t pid = fork();
     if(pid == 0){
+        sigset_t sigset;
+        sigemptyset(&sigset);
+        sigaddset(&sigset,SIGTTIN);
+        sigaddset(&sigset,SIGTTOU);
+        sigaddset(&sigset,SIGCHLD);
+        sigprocmask(SIG_BLOCK,&sigset,NULL);
+        if(redirectStatus == 0){
+            dup2(outdup,STDOUT_FILENO);
+        }
+        else if(redirectStatus > 0){
+            dup2(f1,STDOUT_FILENO);
+        }
+        else{
+            dup2(f1,STDIN_FILENO);
+        }
+
         execvp(command,args);
         printf("Command '%s' not found\n",input);
-        fflush(stdout);
         exit(0);
     }
     else{
         runningJobs++;
         activeJobIndex = storeProcess(pid,input);
+        if(background){
+            activeJobIndex = idle;
+            setpgid(pid,pid);
+        }
+        else setpgid(0,pid);
     }
 }
 

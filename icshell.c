@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include<stdio.h>
 #include<stdlib.h>
 #include<signal.h>
@@ -5,36 +6,50 @@
 #include "jobs.h"
 #include "commandparser.h"
 
-void resetPrompt(){
-    printf("\nicsh>");
-    fflush(stdout);
+void sigIntHandler(){
+    handleSigInt();
+    printf("\n");
 }
 
-void sigIntHandler(int sig){
-    if(!handleSigInt())
-        resetPrompt();
-}
-
-void sigStopHandler(int sig){
-    if(!handleSigStop())
-        resetPrompt();
+void sigStopHandler(){
+    handleSigStop();
+    printf("\n");
 }
 
 char exitCmd[3] = {'$','?'};
 
-void printArgs(char** args){
+void replaceEchoVars(char** args){
     for(char **c = args; *c != NULL; c++){
-        if(strcmp(*c,exitCmd) == 0) printf("%d ",lastExitStatus());
-        else printf("%s ",*c);
+        if(strcmp(*c,exitCmd) == 0){
+            free(*c);
+            int length = snprintf(NULL,0,"%d",lastExitStatus());
+            *c = malloc(length + 1);
+            snprintf(*c,length + 1,"%d",lastExitStatus());
+        }
     }
-    printf("\n");
+}
+
+int sendToBackground(char** args){
+    for(char **c = args; *c != NULL; c++){
+        if(**c == '&'){
+            *c = NULL;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int main(){
 
+    struct sigaction inthandler = {0}; //Initialise other values
+    inthandler.sa_handler = sigIntHandler;
+
+    struct sigaction stophandler = {0};
+    stophandler.sa_handler = sigStopHandler;
+    
     //Assign signal handlers here
-    signal(SIGINT,sigIntHandler);
-    signal(SIGTSTP,sigStopHandler);
+    sigaction(SIGINT,&inthandler,NULL);
+    sigaction(SIGTSTP,&stophandler,NULL);
 
     printf("Welcome to Brandon's Ic Shell (icsh)\n");
     
@@ -47,6 +62,10 @@ int main(){
     initJobs();
 
     while(1){
+
+        while(hasActiveJob() >= 0){
+            continue;
+        }
 
         char *input = malloc(512);
         printf("icsh>");
@@ -67,20 +86,23 @@ int main(){
             free(input);
             freeCommands(commandArgs);
         }
-        else if(strcmp(*commandArgs,echo) == 0){
-            printArgs(commandArgs + 1);
-            free(input);
-            freeCommands(commandArgs);
-        }
         else if(strcmp(*commandArgs,fg) == 0){
+            printf("Bringing job to fg\n");
+            continueJobFg(atoi(*(commandArgs + 1)));
+        }
+        else if(strcmp(*commandArgs,bg) == 0){
+            printf("Continuing background job\n");
             continueJob(atoi(*(commandArgs + 1)));
         }
         else{
-            createNewProcess(*commandArgs,commandArgs,input);
-        }
-
-        while(hasActiveJob() >= 0){
-            continue;
+            int inOut = 0; //-1 for input 1 for output 0 for none
+            char* IOredirect = getRedirect(commandArgs,&inOut);
+            if(strcmp(*commandArgs,echo) == 0){
+                replaceEchoVars(commandArgs);
+            }
+            //printf("Got redirect status %d\n",inOut);
+            createNewProcess(*commandArgs,commandArgs,input,inOut,IOredirect,sendToBackground(commandArgs));
+            freeCommands(commandArgs);
         }
     }
 }
